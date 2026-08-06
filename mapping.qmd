@@ -11,6 +11,7 @@ library(ggiraph)
 library(mapview)
 library(leaflet)
 library(mapgl)
+library(tibble)
 options(scipen = 999)
 ```
 
@@ -369,6 +370,44 @@ mapview(
 ```
 
 Make a scatterplot with `ggplot` showing the relationship between median age and median income between census tracts for your chosen county
+
+```{r}
+library(ggplot2)
+
+library(dplyr)
+library(sf)
+library(ggplot2)
+
+print(names(UdaQueen))
+print(names(IncomeQueen))
+
+age_df <- UdaQueen |>
+  sf::st_drop_geometry() |>
+  dplyr::select(GEOID, median_age = estimate)
+
+income_df <- IncomeQueen |>
+  sf::st_drop_geometry() |>
+  dplyr::select(GEOID, median_income = estimate)
+
+age_df$GEOID <- as.character(age_df$GEOID)
+income_df$GEOID <- as.character(income_df$GEOID)
+
+queens_age_income <- dplyr::left_join(age_df, income_df, by = "GEOID")
+
+print(names(queens_age_income))
+print(sum(is.na(queens_age_income$median_age)))
+print(sum(is.na(queens_age_income$median_income)))
+
+ggplot(data = queens_age_income, aes(x = median_age, y = median_income)) +
+  geom_point(alpha = 0.7, color = "purple") +
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +
+  theme_minimal() +
+  labs(
+    title = "Median Age vs. Median Income by Census Tract, Queens County, NY",
+    x = "Median Age",
+    y = "Median Income"
+  )
+```
 
 #### Challenge 2
 
