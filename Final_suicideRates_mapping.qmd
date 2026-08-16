@@ -1,0 +1,289 @@
+---
+title: "Global Suicide Statistics Worldwide (by country)"
+subtitle: "DS421: Cartographic Design – Final Project"
+format: html
+---
+
+### Install Packages
+
+```{r}
+
+# Download latest version
+
+#install.packages("remotes")
+#remotes::install_github("benyamindsmith/RKaggle")
+
+library(RKaggle)
+```
+
+```{r}
+#Download required libraries
+library(tidyverse)
+library(lubridate)
+library(janitor)
+library(leaflet)
+library(RColorBrewer)
+library(htmlwidgets)
+library(scales)
+library(countrycode)
+#install.packages("countrycode")
+library(shiny)
+library(rnaturalearth)
+#install.packages("rnaturalearth")
+```
+
+### Download and load in dataset
+
+```{r}
+# Downloads and reads the dataset into R as a list of data frames
+suicide_data <- RKaggle::get_dataset("arpitsinghaiml/global-suicide-statistics")
+suicide <- suicide_data[[1]]
+class(suicide)
+```
+
+### Explore dataset
+
+```{r}
+names(suicide_data)
+```
+
+```{r}
+
+suicide <- suicide_data
+class(suicide)  
+names(suicide)
+```
+
+```{r}
+head(suicide_data[[1]])   #Shows first few rows of dataset
+```
+
+### View main table
+
+```{r}
+# Main suicide statistics table
+# The data is already one row per country, with rate columns
+suicide <- suicide_data[[1]]
+
+names(suicide)  
+```
+
+### Inspect column names
+
+```{r}
+# Inspect column names
+colnames(suicide)
+```
+
+### Filter to relevant columns
+
+```{r}
+# Find the key columns defensively, since exact names can vary
+suicide <- suicide_data
+
+names(suicide)  # confirm column names
+
+# This dataset is wide-format: one row per country, rate columns per year/sex
+suicide_clean <- suicide |>
+  select(country, rate_per_100k = SuicideRate_BothSexes_RatePer100k_2021) |>
+  filter(!is.na(country), !is.na(rate_per_100k))
+
+
+suicide_Country <- suicide_clean |>
+  mutate(
+    iso3 = countrycode(country,
+                       origin = "country.name",
+                       destination = "iso3c",
+                       warn = FALSE)
+  ) |>
+  filter(!is.na(iso3))
+
+head(suicide_Country)
+
+# Inspect
+glimpse(suicide_clean)
+```
+
+### Aggregate to the Country
+
+```{r}
+suicide_Country <- suicide_clean |>
+  mutate(
+    iso3 = countrycode(country,
+                       origin = "country.name",
+                       destination = "iso3c",
+                       warn = FALSE)
+  ) |>
+  filter(!is.na(iso3))
+
+head(suicide_Country)
+```
+
+### Load world polygons
+
+```{r}
+# Load world polygons and join suicide data
+world_sf <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Join suicide data to world polygons
+world_suicide <- world_sf |>
+  left_join(suicide_Country, by = c("iso_a3" = "iso3"))
+```
+
+### Create rate categories
+
+```{r}
+# Create incident categories (robust breaks, same pattern as before)
+world_suicide <- world_suicide |>
+  mutate(
+    log_rate = log1p(rate_per_100k)  # log(1 + x) to handle zeros/NAs gracefully
+  )
+
+# Create breaks that are guaranteed to be unique
+breaks <- unique(
+  quantile(world_suicide$log_rate,
+           probs = seq(0, 1, by = 0.25),
+           na.rm = TRUE)
+)
+
+# If there are very few unique values, fall back to simpler breaks
+if (length(breaks) < 2) {
+  breaks <- c(min(world_suicide$log_rate, na.rm = TRUE),
+              max(world_suicide$log_rate, na.rm = TRUE))
+}
+
+# Ensure min and max are covered
+breaks <- c(min(breaks), breaks, max(breaks))
+breaks <- unique(breaks)
+
+# Now create categories
+world_suicide <- world_suicide |>
+  mutate(
+    rate_cat = cut(
+      log_rate,
+      breaks = breaks,
+      include.lowest = TRUE,
+      labels = paste0("Q", seq_len(length(breaks) - 1))
+    )
+  )
+```
+
+### Build and display interactive map
+
+```{r}
+rate_pal <- colorFactor(
+  palette = brewer.pal(min(length(levels(world_suicide$rate_cat)), 5), "Purples"),
+  domain  = levels(world_suicide$rate_cat),
+  levels  = levels(world_suicide$rate_cat),
+  na.color = "#f0f0f0"
+)
+
+popup_Country <- paste0(
+  "<strong>Country:</strong> ", world_suicide$name, "<br/>",
+  "<strong>Rate per 100k:</strong> ",
+  ifelse(is.na(world_suicide$rate_per_100k), "No data", round(world_suicide$rate_per_100k, 1)), "<br/>",
+  "<strong>Total suicides (reported years):</strong> ",
+  ifelse(is.na(world_suicide$total_suicides), 0, comma(world_suicide$total_suicides))
+)
+
+popup_Country <- paste0(
+  "<strong>", world_suicide$name, "</strong><br/>",
+  "Suicide rate: ", ifelse(is.na(world_suicide$rate_per_100k), "No data",
+                            paste0(round(world_suicide$rate_per_100k, 1), " per 100k"))
+)
+
+m_Country <- leaflet(world_suicide) |>
+  addProviderTiles("CartoDB.Positron") |>
+  addPolygons(
+    fillColor = ~rate_pal(rate_cat),
+    fillOpacity = 0.8,
+    color = "white",
+    weight = 0.5,
+    smoothFactor = 0.5,
+    popup = popup_Country,
+    highlightOptions = highlightOptions(
+      color = "purple",
+      weight = 2,
+      bringToFront = TRUE
+    )
+  ) |>
+  addMapPane("labels", zIndex = 450) |>             
+  addProviderTiles(
+    "CartoDB.PositronOnlyLabels",
+    options = leafletOptions(pane = "labels")) |>
+  addLegend(
+    pal = rate_pal,
+    values = ~rate_cat,
+    title = "Suicide rate (log scale)",
+    position = "bottomright",
+    opacity = 0.9
+  ) |>
+  setView(lng = 10, lat = 20, zoom = 2)
+
+# Title
+title_html <- tags$div(
+  tags$h3(
+    "Global Suicide rates",
+    style = "position:absolute; !important; top:10px; left:50px; z-index:9999;
+           background: rgba(255,255,255,0.9); padding: 8px 12px;
+           border-radius: 4px; font-family: sans-serif; margin: 0; box-shadow: 0 1px 4px rgba(0,0,0,0,3); "
+  )
+)
+
+m_Country <- m_Country |> addControl(title_html, position = "topleft")
+
+# Showing map
+m_Country
+
+# saveWidget(m_Country, "suicide_stats_by_Country.html", selfcontained = TRUE)
+```
+
+```{r}
+# ---- Shiny UI and server ----
+
+ui <- fluidPage(
+  titlePanel("DS421 Final Project – Global Suicide Statistics"),
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+      h4("About this project"),
+      p(
+        "This map shows suicide rates per 100,000 people by country, ",
+        "using a data set from kaggle -WHO/World Bank data.- The goal was to show suicide rates specifically on Micronesia or the Pacific Islands as a whole, but that would give me almost nothing to see visually due to the small amount of data on those countries.Due to little data, I found it was best to show a more broad map (globally), that way I have some comparisons in my visual. Mental health disparities are often unavailable or invisible in global statistics, this maps aim is to show the different in rates in different countries. Which can maybe lead to us conversating about where support & aid is needed most."
+      )
+    ),
+    mainPanel(
+  leafletOutput("suicideMap", height = "700px")
+)
+  )
+)
+
+server <- function(input, output, session) {
+  output$suicideMap <- renderLeaflet({
+    m_Country
+  })
+}
+```
+
+
+```{r}
+shinyApp(ui, server)
+```
+```{r}
+install.packages('rsconnect')
+```
+```{r}
+
+#This is just to know rates in the Pacific Islands- since this was my supposed main focus, but not enough data to make a good map.
+library(countrycode)
+
+pacific_check <- suicide_Country |>
+  mutate(subregion = countrycode(iso3, "iso3c", "un.regionsub.name")) |>
+  filter(subregion %in% c("Micronesia", "Melanesia", "Polynesia")) |>
+  arrange(subregion, country)
+
+print(pacific_check)
+```
+
+```{r}
+
