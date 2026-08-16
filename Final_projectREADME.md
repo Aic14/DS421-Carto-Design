@@ -1,5 +1,4 @@
 # DS421-Carto-Design Final Project
-Final Project
 
 # Global Suicide rates — Interactive Map
 
