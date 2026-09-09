@@ -1,0 +1,53 @@
+---
+title: "Shiny_Challenge.qmd"
+format: html
+editor: visual
+---
+
+```{r}
+library(shiny)
+library(mapview)
+library(here)
+library(sf)
+library(tidyverse)
+library(leaflet)
+
+county_data <- st_read(here("data/county_data.gpkg"))
+
+# check column names first
+names(county_data)
+```
+
+Run that last line, find the column related to language, then plug it into the app below (replacing `"your_language_column"`):
+
+```{r}
+ui <- fluidPage(
+  titlePanel("County Language Data"),
+  sidebarLayout(
+    sidebarPanel(
+      selectInput(
+        "var",
+        "Choose variable",
+        choices = names(county_data)
+      )
+    ),
+    mainPanel(
+      leafletOutput("map", height = "700px")
+    )
+  )
+)
+
+server <- function(input, output, session) {
+  output$map <- renderLeaflet({
+    mapview(
+      county_data,
+      zcol = input$var,
+      layer.name = input$var
+    )@map
+  })
+}
+
+shinyApp(ui, server)
+
+#This was done with the help of claude, I did the wrong one- since you asked for the shiny_challenge.md, but I Did the shiny.qmd. I reviewed all your videos, I have a great understanding but I don't have the time due to the time frame.
+```
